@@ -12,10 +12,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -122,33 +124,76 @@ class BorrowServiceTest {
         @Test
         @DisplayName("should throw when member has reached borrowing limit")
         void shouldThrow_WhenBorrowLimitReached() {
-            // TODO: Set up mocks so countActiveBorrowsByMember returns maxBooks (3 for STANDARD)
-            //       Then verify BorrowLimitExceededException is thrown
-            fail("Not implemented yet");
+            // Arrange: simulate the member's limit (3 for standard)
+            when(memberRepository.findById(1L)).thenReturn(Optional.of(sampleMember));
+            when(bookRepository.findById(1L)).thenReturn(Optional.of(sampleBook));
+            when(borrowRecordRepository.countActiveBorrowsByMember(1L)).thenReturn(3);
+
+            // Act and Assert: should throw a BorrowLimitExceededException when trying to buy a new book
+            BorrowLimitExceededException exception = assertThrows(BorrowLimitExceededException.class,
+                    () -> borrowService.borrowBook(1L, 1L));
+
+            // Extra Assert: confirm the truth of the error message
+            assertEquals("Alice has reached the borrowing limit of 3 books", exception.getMessage());
+
+            // verify that the db record method was never called (isolation)
+            verify(borrowRecordRepository, never()).save(any());
         }
 
         @Test
         @DisplayName("should throw when member already has this book borrowed")
         void shouldThrow_WhenDuplicateBorrow() {
-            // TODO: Set up mocks so existsByBookIdAndMemberIdAndStatus returns true
-            //       Then verify IllegalStateException is thrown
-            fail("Not implemented yet");
+            // Arrange: simulate the member has already borrowed this book
+            when(memberRepository.findById(1L)).thenReturn(Optional.of(sampleMember));
+            when(bookRepository.findById(1L)).thenReturn(Optional.of(sampleBook));
+            when(borrowRecordRepository.countActiveBorrowsByMember(1L)).thenReturn(0);
+            when(borrowRecordRepository.existsByBookIdAndMemberIdAndStatus(1L, 1L, BorrowStatus.BORROWED))
+                    .thenReturn(true);
+
+            // Act & Assert: should throw an IllegalStateException when try to get the same book again.
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
+                    () -> borrowService.borrowBook(1L, 1L));
+
+            assertEquals("Member already has this book borrowed", exception.getMessage());
+            verify(borrowRecordRepository, never()).save(any());
         }
 
         @Test
         @DisplayName("should throw when inactive member tries to borrow")
         void shouldThrow_WhenMemberInactive() {
-            // TODO: Set member.active = false
-            //       Then verify IllegalStateException is thrown with appropriate message
-            fail("Not implemented yet");
+            // Arrange: make member inactive
+            sampleMember.setActive(false);
+            when(memberRepository.findById(1L)).thenReturn(Optional.of(sampleMember));
+
+            // Act & Assert: IllegalStateException must be thrown when a passive member attempts to purchase a book.
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
+                    () -> borrowService.borrowBook(1L, 1L));
+
+            assertEquals("Inactive members cannot borrow books", exception.getMessage());
         }
 
         @Test
         @DisplayName("should decrease available copies after successful borrow")
         void shouldDecreaseAvailableCopies() {
-            // TODO: After borrowBook(), verify that book.availableCopies decreased by 1
-            //       Hint: Use ArgumentCaptor to capture the Book saved to repository
-            fail("Not implemented yet");
+            // Arrange: preparing a successful loan scenario.
+            when(memberRepository.findById(1L)).thenReturn(Optional.of(sampleMember));
+            when(bookRepository.findById(1L)).thenReturn(Optional.of(sampleBook));
+            when(borrowRecordRepository.countActiveBorrowsByMember(1L)).thenReturn(0);
+            when(borrowRecordRepository.existsByBookIdAndMemberIdAndStatus(1L, 1L, BorrowStatus.BORROWED))
+                    .thenReturn(false);
+
+            // ArgumentCaptor with bookRepository.save() capturing the Book object that goes to the method
+            ArgumentCaptor<Book> bookCaptor = ArgumentCaptor.forClass(Book.class);
+
+            // Act: Borrow the book
+            borrowService.borrowBook(1L, 1L);
+
+            // Assert: bookRepository.save() verify that the method was called and capture the outgoing object.
+            verify(bookRepository).save(bookCaptor.capture());
+            Book savedBook = bookCaptor.getValue();
+
+            // Confirm that the number of copies, initially 3, has been reduced to 2.
+            assertEquals(2, savedBook.getAvailableCopies());
         }
     }
 
@@ -163,29 +208,52 @@ class BorrowServiceTest {
         @Test
         @DisplayName("should successfully return a borrowed book")
         void shouldReturnBook_WhenBorrowed() {
-            // TODO: Create a BorrowRecord with BORROWED status
-            //       Mock the repository to return it
-            //       Call returnBook() and verify:
-            //       - status changed to RETURNED
-            //       - returnDate is set
-            //       - available copies increased
-            fail("Not implemented yet");
+            // Arrange: Create an active borrowing record.
+            BorrowRecord record = new BorrowRecord(sampleBook, sampleMember);
+            record.setId(1L);
+            when(borrowRecordRepository.findById(1L)).thenReturn(Optional.of(record));
+
+            int initialCopies = sampleBook.getAvailableCopies(); //
+
+            // Act: return the book
+            BorrowResponse response = borrowService.returnBook(1L);
+
+            // Assert: Confirm that the status is RETURNED and the return date has been set to today.
+            assertEquals(BorrowStatus.RETURNED, response.getStatus());
+            assertEquals(LocalDate.now(), response.getReturnDate());
+
+            // We confirm that the number of book copies has increased by 1.
+            verify(bookRepository).save(sampleBook);
+            assertEquals(initialCopies + 1, sampleBook.getAvailableCopies());
         }
 
         @Test
         @DisplayName("should throw when trying to return an already returned book")
         void shouldThrow_WhenAlreadyReturned() {
-            // TODO: Create a BorrowRecord with RETURNED status
-            //       Verify IllegalStateException is thrown
-            fail("Not implemented yet");
+            // Arrange: Create a record that has already been returned.
+            BorrowRecord record = new BorrowRecord(sampleBook, sampleMember);
+            record.setId(1L);
+            record.setStatus(BorrowStatus.RETURNED);
+            when(borrowRecordRepository.findById(1L)).thenReturn(Optional.of(record));
+
+            // Act & Assert: It should throw an IllegalStateException when it tries to return it again.
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
+                    () -> borrowService.returnBook(1L));
+
+            assertEquals("This book has already been returned", exception.getMessage());
         }
 
         @Test
         @DisplayName("should throw when borrow record not found")
         void shouldThrow_WhenRecordNotFound() {
-            // TODO: Mock repository to return empty Optional
-            //       Verify IllegalStateException is thrown
-            fail("Not implemented yet");
+            // Arrange: Simulate that the record cannot be found in the database.
+            when(borrowRecordRepository.findById(99L)).thenReturn(Optional.empty());
+
+            // Act & Assert
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
+                    () -> borrowService.returnBook(99L));
+
+            assertEquals("Borrow record not found: 99", exception.getMessage());
         }
     }
 }
