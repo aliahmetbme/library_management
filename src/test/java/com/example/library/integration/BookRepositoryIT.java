@@ -11,12 +11,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 
+
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * INTEGRATION TEST - Repository Layer
@@ -100,7 +101,8 @@ class BookRepositoryIT extends AbstractIntegrationTest {
         @Test
         @DisplayName("should find available books (copies > 0)")
         void shouldFindAvailableBooks() {
-            Book available = createBook("978-1", "Available Book", "Author A", 3, Genre.FICTION);
+            createBook("978-1", "Available Book", "Author A", 3, Genre.FICTION);
+
             Book unavailable = createBook("978-2", "Unavailable Book", "Author B", 1, Genre.FICTION);
             unavailable.setAvailableCopies(0);
             bookRepository.save(unavailable);
@@ -123,32 +125,45 @@ class BookRepositoryIT extends AbstractIntegrationTest {
         @Test
         @DisplayName("should find books by genre")
         void shouldFindByGenre() {
-            // TODO: Save books of different genres
-            //       Query by Genre.SCIENCE and verify only matching books are returned
-            fail("Not implemented yet");
+            createBook("978-S1", "Science Book", "Author S", 5, Genre.SCIENCE);
+            createBook("978-H1", "History Book", "Author H", 2, Genre.HISTORY);
+
+            List<Book> results = bookRepository.findByGenre(Genre.SCIENCE);
+
+            assertThat(results).hasSize(1);
+            assertThat(results.get(0).getGenre()).isEqualTo(Genre.SCIENCE);
         }
 
         @Test
         @DisplayName("should find books by author (case insensitive, partial match)")
         void shouldFindByAuthor() {
-            // TODO: Save books by different authors
-            //       Search by partial author name and verify results
-            fail("Not implemented yet");
+            createBook("978-A1", "Effective Java", "Joshua Bloch", 3, Genre.TECHNOLOGY);
+
+            List<Book> results = bookRepository.findByAuthorContainingIgnoreCase("bloch");
+
+            assertThat(results).isNotEmpty();
+            assertThat(results.get(0).getAuthor()).isEqualTo("Joshua Bloch");
         }
 
         @Test
         @DisplayName("should search by author name using searchBooks()")
         void shouldSearchByAuthorKeyword() {
-            // TODO: Use searchBooks() with an author name as keyword
-            //       Verify it finds books by that author
-            fail("Not implemented yet");
+            createBook("978-A2", "Clean Code", "Robert C. Martin", 3, Genre.TECHNOLOGY);
+
+            List<Book> results = bookRepository.searchBooks("Martin");
+
+            assertThat(results).isNotEmpty();
+            assertThat(results.get(0).getAuthor()).contains("Robert C. Martin");
         }
 
         @Test
         @DisplayName("should return empty list when no books match search")
         void shouldReturnEmpty_WhenNoMatch() {
-            // TODO: Search for a keyword that matches nothing
-            fail("Not implemented yet");
+            createBook("978-1", "Test Book", "Test Author", 1, Genre.FICTION);
+
+            List<Book> results = bookRepository.searchBooks("NonExistentKeyword");
+
+            assertThat(results).isEmpty();
         }
     }
 
@@ -159,17 +174,25 @@ class BookRepositoryIT extends AbstractIntegrationTest {
         @Test
         @DisplayName("should enforce unique ISBN constraint")
         void shouldEnforceUniqueIsbn() {
-            // TODO: Try to save two books with the same ISBN
-            //       Verify a DataIntegrityViolationException is thrown
-            //       Hint: Use assertThrows() and flush the persistence context
-            fail("Not implemented yet");
+            createBook("978-SAME", "First Book", "Author A", 1, Genre.FICTION);
+
+            Book secondBook = new Book("978-SAME", "Second Book", "Author B", 1, Genre.FICTION);
+            secondBook.setPublishedDate(LocalDate.now());
+
+            assertThrows(RuntimeException.class, () -> bookRepository.saveAndFlush(secondBook));
         }
 
         @Test
         @DisplayName("should handle deleting a book")
         void shouldDeleteBook() {
-            // TODO: Save a book, delete it, verify it's gone
-            fail("Not implemented yet");
+            Book saved = createBook("978-DEL", "Delete Me", "Author X", 1, Genre.FICTION);
+            Long id = saved.getId();
+
+            bookRepository.delete(saved);
+            bookRepository.flush();
+
+            Optional<Book> found = bookRepository.findById(id);
+            assertThat(found).isEmpty();
         }
     }
 }
